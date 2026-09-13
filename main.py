@@ -29,14 +29,14 @@ DB_CONFIG = {
     "host": os.getenv("DB_HOST"),
     "port": os.getenv("DB_PORT"),
 }
-print(DB_CONFIG)
-
 
 def get_current_semester(group_name):
     # Извлечение года поступления (последние две цифры)
     match = re.search(r'\d{2}$', group_name)
     if not match:
-        return "Ошибка при извлечении года"
+        raise ValueError(
+            f"Не удалось определить год поступления из группы '{group_name}'"
+        )
     admission_year = 2000 + int(match.group())
 
     # Текущая дата
@@ -61,85 +61,125 @@ def get_current_semester(group_name):
 
 def main():
     if len(sys.argv) != 2:
-        print("Использование программы: make load file=Имя_файла.html ИЛИ file=Имя_файла.csv")
+        print(
+            "Использование программы: "
+            "make load file=Имя_файла.html "
+            "ИЛИ file=Имя_файла.csv"
+        )
         sys.exit(1)
-    
+
     filename = sys.argv[1]
     ext = os.path.splitext(filename)[1].lower()
 
-    conn = psycopg2.connect(**DB_CONFIG, connect_timeout=5)
+    conn = None
 
     try:
         if ext == ".html":
-            group_name, disciplines, students = parse_html(filename)
+            report = parse_html(filename)
         elif ext == ".csv":
-            group_name, disciplines, students = parse_csv(filename)
+            report = parse_csv(filename)
         else:
-            print(f"[!] Неподдерживаемое расширение файла: {ext}")
-            sys.exit(1)
+            raise ValueError(
+                f"Неподдерживаемое расширение файла: {ext}"
+            )
+
+        group_name = report.group_name
+        controls = report.controls
+        students = report.students
 
         semester = get_current_semester(group_name)
-        plan_id = get_plan_for_group(conn, group_name)
-        if plan_id == None:
-            plan_id = fill_new_plan(conn, group_name)
-                
+
+        conn = psycopg2.connect(
+            **DB_CONFIG,
+            connect_timeout=5,
+        )
+
+        plan_id = get_plan_for_group(
+            conn,
+            group_name,
+        )
+
+        if plan_id is None:
+            plan_id = fill_new_plan(
+                conn,
+                group_name,
+            )
+
         disc_ids = {}
-        for disc in disciplines:
-            disc_ids[disc["title"]] = get_disc_id_by_title(connection=conn, title=disc["title"])
-            if disc_ids[disc["title"]] == None:
-                print(f"[!] Ошибка: отсутствует информация о предмете: {disc["title"]}")
-                sys.exit(1)
-        
-        non_control_id_discs = []
-        for disc in disciplines:
-            control_id = get_control_id_by_disc_plan_form_sem(
-                    connection=conn, 
-                    plan_id=plan_id,
-                    disc_id=disc_ids[disc["title"]],
-                    form=disc["type"],
-                    sem=semester
+
+        for control in controls:
+            title = control.discipline.title
+
+            disc_id = get_disc_id_by_title(
+                connection=conn,
+                title=title,
+            )
+
+            if disc_id is None:
+                raise ValueError(
+                    f"Отсутствует информация о предмете: {title}"
                 )
-            # Так как у одной дисциплины может быть несколько типов аккредитации, 
-            # то уникальным ключом будет являться результат 
-            # конкатенации названия предмета и типа аккредитации
-            if control_id == None:
-                non_control_id_discs.append(disc)
-        if len(non_control_id_discs) != 0:
+
+            disc_ids[title] = disc_id
+
+        missing_controls = []
+
+        for control in controls:
+            title = control.discipline.title
+
+            control_id = get_control_id_by_disc_plan_form_sem(
+                connection=conn,
+                plan_id=plan_id,
+                disc_id=disc_ids[title],
+                form=control.control_type,
+                sem=semester,
+            )
+
+            if control_id is None:
+                missing_controls.append(control)
+
+        if missing_controls:
             fill_ra_control(
-                            connection=conn, 
-                            plan_id=plan_id, 
-                            semester=semester, 
-                            disciplines=non_control_id_discs
-                        )
+                connection=conn,
+                plan_id=plan_id,
+                semester=semester,
+                controls=missing_controls,
+            )
 
-        insert_ra_mark(conn=conn, students=students, plan_id=plan_id, sem=semester)
+        version_id = insert_ra_mark(
+            conn=conn,
+            students=students,
+            plan_id=plan_id,
+            sem=semester,
+        )
 
-        insert_ra_results(conn=conn, sem=semester)
-        print(f"[+] Данные из файла {filename} успешно занесены!")
+        insert_ra_results(
+            conn=conn,
+            sem=semester,
+            version_id=version_id,
+        )
+
+        conn.commit()
+
+        print(
+            f"[+] Данные из файла {filename} "
+            f"успешно занесены!"
+        )
+
     except Exception as e:
-        print(f"[!] При выполнении программы произошла ошибка: {e}")
+        if conn is not None:
+            conn.rollback()
+
+        print(
+            f"[!] При выполнении программы "
+            f"произошла ошибка: {e}"
+        )
+
         sys.exit(1)
+
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()        
         
-        
-
-        # Порядок заполнения БД:
-        # 1) Парсим данные. Они прилетают в виде трёх структур: 
-        #    - group_name    - названи
-        #    - disciplines   - список дисциплин, где дисциплина - словарь
-        #    - - ["title"]   - ключ, по которому получаем название предмета
-        #    - - ["type"]    - ключ, по которому получаем тип аккредитации (нормализованный в соотв. с TYPE_MAPPING в normalization.py)
-        #    - students      - список студентов, где студент - словарь
-        #    - - ["id"]      - ключ, по которому получаем студенческий шифр студента
-        #    - - ["name"]    - ключ, по которому получаем полные ФИО студента
-        #    - - ["grades"]  - ключ, по которому получаем список словарей с оценками ["discipline" - название предмета, "type" - тип аккредитации, "grade" - оценка]
-        # 2) Определяем текущий семестр у группы, оценки которой пришли в программу
-        # 3) Проверяем наличие плана для группы студентов (план на каждый курс уникален, каждое новое поступление - новый план, проверяем год поступления по первым двум числам в названии группы)
-        # 4) Проверяем наличие дисциплин в таблице ra_disc
-        # 5) Проверяем таблицу ra_control на наличие в ней записей о нынешних дисциплинах и типах аккредитации для конкретного семестра. Если чего-то нет - создаём
-        # 6) Заполняем таблицу ra_mark
-        # 7) Заполняем таблицу ra_results
-
 if __name__ == "__main__":
     main()

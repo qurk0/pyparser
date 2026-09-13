@@ -1,19 +1,7 @@
-def get_student_marks_with_context(conn, stud_id):
-    """
-    Получает все оценки студента по последней версии с деталями:
-    - семестр (по ключу "sem")
-    - форма контроля (по ключу "form")
-    - max_grade (по ключу "max_grade")
-    - кафедра дисциплины (по ключу "department_id")
-    - оценка (по ключу "grade")
-    """
+def get_student_marks_with_context(conn, stud_id, version_id):
     with conn.cursor() as cur:
-        # Получаем последнюю версию
-        cur.execute("SELECT id FROM ra_version ORDER BY created DESC LIMIT 1")
-        version_id = cur.fetchone()[0]
-
-        # Получаем оценки с контекстом
-        cur.execute("""
+        cur.execute(
+            """
             SELECT 
                 rc.sem,
                 rc.form,
@@ -23,17 +11,21 @@ def get_student_marks_with_context(conn, stud_id):
             FROM ra_mark rm
             JOIN ra_control rc ON rm.control_id = rc.id
             JOIN ra_disc rd ON rc.disc_id = rd.id
-            WHERE rm.version_id = %s AND rm.stud_id = %s
-        """, (version_id, stud_id))
+            WHERE rm.version_id = %s
+              AND rm.stud_id = %s
+            """,
+            (version_id, stud_id),
+        )
 
         rows = cur.fetchall()
+
         return [
             {
                 "sem": row[0],
                 "form": row[1],
                 "max_grade": row[2],
                 "department_id": row[3],
-                "grade": row[4]
+                "grade": row[4],
             }
             for row in rows
         ]
@@ -143,7 +135,7 @@ def get_open_semester(marks_with_context):
 
     return min(open_sems) if open_sems else 0
 
-def collect_ra_results(conn, sem):
+def collect_ra_results(conn, sem, version_id):
     """
     Возвращает список словарей с результатами для всех студентов.
     """
@@ -154,7 +146,7 @@ def collect_ra_results(conn, sem):
     results = []
 
     for stud_id in student_ids:
-        marks = get_student_marks_with_context(conn, stud_id)
+        marks = get_student_marks_with_context(conn, stud_id, version_id)
         session_score, total_score, vega, vm, other, percent = calculate_scores_and_departments_with_percent(marks)
         diff_score, diff_percent = calculate_diffs(conn, stud_id, total_score, percent)
         open_sem = get_open_semester(marks)
@@ -175,28 +167,29 @@ def collect_ra_results(conn, sem):
 
     return results
 
-def insert_ra_results(conn, sem):
-    """
-    Обновляет или добавляет результаты в ra_results для каждого студента.
-    """
-    results = collect_ra_results(conn, sem)
+def insert_ra_results(conn, sem, version_id):
+    results = collect_ra_results(conn, sem, version_id)
 
-    # Сортировка по percent DESC для расчёта позиции в рейтинге
     results.sort(key=lambda r: r["percent"], reverse=True)
 
     with conn.cursor() as cur:
         for position, row in enumerate(results, start=1):
-            # Проверяем, есть ли запись по stud_id
-            cur.execute("""
-                SELECT 1 FROM ra_results WHERE stud_id = %s
-            """, (row["stud_id"],))
+            cur.execute(
+                """
+                SELECT 1
+                FROM ra_results
+                WHERE stud_id = %s
+                """,
+                (row["stud_id"],),
+            )
+
             exists = cur.fetchone()
 
             if exists:
-                # Обновляем
-                cur.execute("""
+                cur.execute(
+                    """
                     UPDATE ra_results
-                    SET 
+                    SET
                         position = %s,
                         cur_sem = %s,
                         open_sem = %s,
@@ -209,29 +202,57 @@ def insert_ra_results(conn, sem):
                         percent = %s,
                         diff_percent = %s
                     WHERE stud_id = %s
-                """, (
-                    position, row["cur_sem"], row["open_sem"],
-                    row["session_score"], row["total_score"], row["diff_score"],
-                    row["vega"], row["vm"], row["other"],
-                    row["percent"], row["diff_percent"], row["stud_id"]
-                ))
+                    """,
+                    (
+                        position,
+                        row["cur_sem"],
+                        row["open_sem"],
+                        row["session_score"],
+                        row["total_score"],
+                        row["diff_score"],
+                        row["vega"],
+                        row["vm"],
+                        row["other"],
+                        row["percent"],
+                        row["diff_percent"],
+                        row["stud_id"],
+                    ),
+                )
             else:
-                # Вставляем новую запись
-                cur.execute("""
+                cur.execute(
+                    """
                     INSERT INTO ra_results (
-                        position, stud_id, cur_sem, open_sem,
-                        session_score, total_score, diff_score,
-                        vega, vm, other, percent, diff_percent
-                    ) VALUES (
-                        %s, %s, %s, %s, %s,
-                        %s, %s, %s,
-                        %s, %s, %s, %s
+                        position,
+                        stud_id,
+                        cur_sem,
+                        open_sem,
+                        session_score,
+                        total_score,
+                        diff_score,
+                        vega,
+                        vm,
+                        other,
+                        percent,
+                        diff_percent
                     )
-                """, (
-                    position, row["stud_id"], row["cur_sem"], row["open_sem"],
-                    row["session_score"], row["total_score"], row["diff_score"],
-                    row["vega"], row["vm"], row["other"],
-                    row["percent"], row["diff_percent"]
-                ))
-
-    conn.commit()
+                    VALUES (
+                        %s, %s, %s, %s,
+                        %s, %s, %s,
+                        %s, %s, %s, %s, %s
+                    )
+                    """,
+                    (
+                        position,
+                        row["stud_id"],
+                        row["cur_sem"],
+                        row["open_sem"],
+                        row["session_score"],
+                        row["total_score"],
+                        row["diff_score"],
+                        row["vega"],
+                        row["vm"],
+                        row["other"],
+                        row["percent"],
+                        row["diff_percent"],
+                    ),
+                )

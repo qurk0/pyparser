@@ -1,83 +1,74 @@
 def parse_group_info(group_name):
-    # У нас группа имеет вид КМ_О-ХХ-ХХ
-    # нас интересует символ _ (уровень обучения) и вторые ХХ (год поступления)
+    if not isinstance(group_name, str):
+        raise ValueError("Название группы должно быть строкой")
+
     try:
-        data = {}
-        level_char = group_name[2] # Берем третий символ названия группы
-        if level_char == "Б": 
-            data["level"] = 1
-        elif level_char == "М":
-            data["level"] = 2
-        else:
-            raise ValueError("Неккоректное название группы")
-    
-        data["year"] = int(group_name.split("-")[-1])
-        return data    
-    
-    except Exception as e:
-        print(f"[!] Ошибка при разборе названия группы: {e}")
-        return None
+        level_char = group_name[2]
+        year = int(group_name.split("-")[-1])
+    except (IndexError, ValueError):
+        raise ValueError(
+            f"Некорректное название группы: {group_name}"
+        )
+
+    if level_char == "Б":
+        level = 1
+    elif level_char == "М":
+        level = 2
+    else:
+        raise ValueError(
+            f"Неизвестный уровень обучения в группе: {group_name}"
+        )
+
+    return {
+        "level": level,
+        "year": year,
+    }
     
 def fill_new_plan(connection, group_name):
-    data = parse_group_info(group_name=group_name)
-    try:
-        cursor = connection.cursor()
-        select_query = '''
-        SELECT * FROM ra_plan
-        WHERE level = %s AND year = %s;
-        '''
-        cursor.execute(select_query, (data["level"], data["year"]))
-        if cursor.fetchall() == []:
-            insert_query = '''
-            INSERT INTO ra_plan (level, year)
+    group_info = parse_group_info(group_name)
+
+    with connection.cursor() as cursor:
+        query = """
+            INSERT INTO ra_plan (
+                level,
+                year
+            )
             VALUES (%s, %s)
-            RETURNING id;
-            '''
+            RETURNING id
+        """
 
-            cursor.execute(insert_query, (data["level"], data["year"]))
-            inserted_id = cursor.fetchone()[0]
-            connection.commit()
+        cursor.execute(
+            query,
+            (
+                group_info["level"],
+                group_info["year"],
+            ),
+        )
 
-            return inserted_id
-        
-    except Exception as e:
-        print(f"[!] Ошибка при внесении данных в таблицу : {e}")
-        connection.rollback()
-        return None
-    finally: 
-        cursor.close()
+        return cursor.fetchone()[0]
 
 def get_plan_for_group(connection, group_name):
-    try:
-        # Разбираем название группы, чтобы получить уровень обучения и год поступления
-        group_info = parse_group_info(group_name)
-        if not group_info:
-            print("[!] Ошибка: не удалось разобрать название группы.")
-            return None
+    group_info = parse_group_info(group_name)
 
-        level = group_info["level"]
-        year = group_info["year"]
+    with connection.cursor() as cursor:
+        query = """
+            SELECT id
+            FROM ra_plan
+            WHERE level = %s
+              AND year = %s
+        """
 
-        # Выполняем запрос к таблице ra_plan
-        cursor = connection.cursor()
-        select_query = '''
-        SELECT id FROM ra_plan
-        WHERE level = %s AND year = %s;
-        '''
-        cursor.execute(select_query, (level, year))
+        cursor.execute(
+            query,
+            (
+                group_info["level"],
+                group_info["year"],
+            ),
+        )
+
         result = cursor.fetchone()
 
-        if result:
-            plan_id = result[0]
-            print(f"[+] Найден учебный план с id: {plan_id} для уровня {level} и года {year}.")
-            return plan_id
-        else:
-            print(f"[!] Учебный план для уровня {level} и года {year} не найден.")
-            inserted_id = fill_new_plan(connection, {"level": level, "year": year})
-            return inserted_id
-    except Exception as e:
-        print(f"[!] Ошибка при получении учебного плана: {e}")
-        return None
-    finally:
-        if 'cursor' in locals():
-            cursor.close()
+        if result is None:
+            return None
+
+        return result[0]
