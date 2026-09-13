@@ -121,7 +121,7 @@ def parse_html(file_path):
     )
 
 if __name__ == "__main__":
-    report = parse_html("страница_бакалавры.html")
+    report = parse_html("test.html")
 
     print(report.group_name)
     print(report.controls[:3])
