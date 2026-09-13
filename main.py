@@ -59,6 +59,63 @@ def get_current_semester(group_name):
 
     return semester
 
+def import_report(conn, report):
+    group_name = report.group_name
+    controls = report.controls
+    students = report.students
+    semester = get_current_semester(group_name)
+    plan_id = get_plan_for_group(
+        conn,
+        group_name,
+    )
+    if plan_id is None:
+        plan_id = fill_new_plan(
+            conn,
+            group_name,
+        )
+    disc_ids = {}
+    for control in controls:
+        title = control.discipline.title
+        disc_id = get_disc_id_by_title(
+            connection=conn,
+            title=title,
+        )
+        if disc_id is None:
+            raise ValueError(
+                f"Отсутствует информация о предмете: {title}"
+            )
+        disc_ids[title] = disc_id
+    missing_controls = []
+    for control in controls:
+        title = control.discipline.title
+        control_id = get_control_id_by_disc_plan_form_sem(
+            connection=conn,
+            plan_id=plan_id,
+            disc_id=disc_ids[title],
+            form=control.control_type,
+            sem=semester,
+        )
+        if control_id is None:
+            missing_controls.append(control)
+    if missing_controls:
+        fill_ra_control(
+            connection=conn,
+            plan_id=plan_id,
+            semester=semester,
+            controls=missing_controls,
+        )
+    version_id = insert_ra_mark(
+        conn=conn,
+        students=students,
+        plan_id=plan_id,
+        sem=semester,
+    )
+    insert_ra_results(
+        conn=conn,
+        sem=semester,
+        version_id=version_id,
+    )
+
 def main():
     if len(sys.argv) != 2:
         print(
@@ -83,80 +140,14 @@ def main():
                 f"Неподдерживаемое расширение файла: {ext}"
             )
 
-        group_name = report.group_name
-        controls = report.controls
-        students = report.students
-
-        semester = get_current_semester(group_name)
-
         conn = psycopg2.connect(
             **DB_CONFIG,
             connect_timeout=5,
         )
 
-        plan_id = get_plan_for_group(
+        import_report(
             conn,
-            group_name,
-        )
-
-        if plan_id is None:
-            plan_id = fill_new_plan(
-                conn,
-                group_name,
-            )
-
-        disc_ids = {}
-
-        for control in controls:
-            title = control.discipline.title
-
-            disc_id = get_disc_id_by_title(
-                connection=conn,
-                title=title,
-            )
-
-            if disc_id is None:
-                raise ValueError(
-                    f"Отсутствует информация о предмете: {title}"
-                )
-
-            disc_ids[title] = disc_id
-
-        missing_controls = []
-
-        for control in controls:
-            title = control.discipline.title
-
-            control_id = get_control_id_by_disc_plan_form_sem(
-                connection=conn,
-                plan_id=plan_id,
-                disc_id=disc_ids[title],
-                form=control.control_type,
-                sem=semester,
-            )
-
-            if control_id is None:
-                missing_controls.append(control)
-
-        if missing_controls:
-            fill_ra_control(
-                connection=conn,
-                plan_id=plan_id,
-                semester=semester,
-                controls=missing_controls,
-            )
-
-        version_id = insert_ra_mark(
-            conn=conn,
-            students=students,
-            plan_id=plan_id,
-            sem=semester,
-        )
-
-        insert_ra_results(
-            conn=conn,
-            sem=semester,
-            version_id=version_id,
+            report,
         )
 
         conn.commit()
