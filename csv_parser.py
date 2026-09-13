@@ -1,6 +1,7 @@
-from normalization import GRADE_MAPPING
 import pandas as pd
-import json
+
+from normalization import GRADE_MAPPING, TYPE_MAPPING
+from models import ParsedReport, Grade, Student, Discipline, Control
 
 def parse_csv(file_path: str):
     df = pd.read_csv(file_path, encoding="cp1251", sep=";", header=None)
@@ -18,17 +19,29 @@ def parse_csv(file_path: str):
         discipline_end_col += 1
 
     # Извлечение дисциплин из строки 6
-    disciplines = []
+    controls = []
     for col in range(discipline_start_col, discipline_end_col):
         value = df.iloc[6, col]
         if pd.notna(value):
-            parts = value.split(", ")
-            if len(parts) == 2:
-                title, dtype = parts
-            else:
-                title = value
-                dtype = "Неизвестно"
-            disciplines.append({"title": title.strip(), "type": dtype.strip()})
+            title, dtype = str(value).rsplit(", ", 1)
+            control_type = TYPE_MAPPING.get(dtype.strip())
+
+            if control_type is None:
+                raise ValueError(
+                    f"Неизвестный тип контроля '{dtype}' "
+                    f"для дисциплины '{title}'"
+                )
+                
+            discipline = Discipline(
+                title=title.strip(),
+            )
+
+            control = Control(
+                discipline = discipline,
+                control_type = control_type,
+            )
+
+            controls.append(control)
 
     # Извлечение студентов с оценками
     students = []
@@ -38,33 +51,54 @@ def parse_csv(file_path: str):
         if pd.isna(name):
             break
 
-        grades = []
-        for j, discipline in enumerate(disciplines):
-            col = j + discipline_start_col
-            grade = df.iloc[i, col]
-            if pd.notna(grade) and str(grade).strip() != "":
-                if grade == "х" or grade == "x":
-                    grade = ""
-                grade = GRADE_MAPPING.get(grade, grade)
-                grades.append({
-                    "discipline": discipline["title"],
-                    "type": discipline["type"],
-                    "grade": str(grade).strip()
-                })
+        student_grades = []
 
-        students.append({
-            "id": str(student_id).strip(),
-            "name": str(name).strip(),
-            "grades": grades
-        })
+    for j, control in enumerate(controls):
+        col = j + discipline_start_col
+        raw_grade = df.iloc[i, col]
 
-    return {
-        "group_name": group_name,
-        "disciplines": disciplines,
-        "students": students
-    }
+        if pd.isna(raw_grade):
+            grade_text = ""
+        else:
+            grade_text = str(raw_grade).strip()
+
+        # В CSV строчные x/х означают отсутствие оценки
+        if grade_text in ("х", "x"):
+            grade_text = ""
+
+        if grade_text not in GRADE_MAPPING:
+            raise ValueError(
+                f"Неизвестная оценка '{grade_text}' "
+                f"у студента '{name}'"
+            )
+
+        grade_value = GRADE_MAPPING[grade_text]
+
+        student_grades.append(
+            Grade(
+                control=control,
+                value=grade_value,
+            )
+        )
+
+    students.append(
+        Student(
+            id=str(student_id).strip(),
+            name=str(name).strip(),
+            grades=student_grades,
+        )
+    )
+
+    return ParsedReport(
+        group_name=str(group_name).strip(),
+        controls=controls,
+        students=students,
+    )
 
 # Пример использования:
 if __name__ == "__main__":
-    result = parse_csv("test.csv")
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    report = parse_csv("test.csv")
+
+    print(report.group_name)
+    print(report.controls[:5])
+    print(report.students[:2])
