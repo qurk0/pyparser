@@ -30,8 +30,8 @@ def test_parse_html_first_control(report):
 def test_parse_html_first_student(report):
     student = report.students[0]
 
-    assert student.id == "21К0522"
-    assert student.name == "Александров П.В."
+    assert student.id == "21К0001"
+    assert student.name == "Тестов А.А."
 
 def test_parse_html_first_grade(report):
     grade = report.students[0].grades[0]
