@@ -158,12 +158,19 @@ def test_import_report_rollback(get_conn):
 def test_collect_ra_results_only_contains_students_from_current_version(get_conn):
     conn = get_conn
 
+    report = parse_html(FIXTURES_DIR / "test.html")
+
+    import_report(
+        conn,
+        report,
+    )
+
     with conn.cursor() as cur:
         # Берём существующего студента.
         cur.execute("SELECT id FROM students LIMIT 1")
         student_with_marks = cur.fetchone()[0]
 
-        # Создаём тестовую версию.
+        # Создаём отдельную тестовую версию.
         cur.execute(
             """
             INSERT INTO ra_version (created, comment)
@@ -173,17 +180,26 @@ def test_collect_ra_results_only_contains_students_from_current_version(get_conn
         )
         version_id = cur.fetchone()[0]
 
-        # Берём существующий control_id.
+        # После обычного импорта формы контроля уже существуют.
         cur.execute("SELECT id FROM ra_control LIMIT 1")
         control_id = cur.fetchone()[0]
 
-        # В этой версии оценка существует ТОЛЬКО у одного студента.
         cur.execute(
             """
-            INSERT INTO ra_mark (version_id, stud_id, control_id, grade)
+            INSERT INTO ra_mark (
+                version_id,
+                stud_id,
+                control_id,
+                grade
+            )
             VALUES (%s, %s, %s, %s)
             """,
-            (version_id, student_with_marks, control_id, 5),
+            (
+                version_id,
+                student_with_marks,
+                control_id,
+                5,
+            ),
         )
 
     results = collect_ra_results(
@@ -192,7 +208,10 @@ def test_collect_ra_results_only_contains_students_from_current_version(get_conn
         version_id=version_id,
     )
 
-    student_ids = [result["stud_id"] for result in results]
+    student_ids = [
+        result["stud_id"]
+        for result in results
+    ]
 
     assert student_ids == [student_with_marks]
 

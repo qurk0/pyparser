@@ -1,3 +1,28 @@
+-- Таблица групп
+CREATE TABLE IF NOT EXISTS groups (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    level INTEGER,
+    year INTEGER
+);
+
+-- Таблица студентов
+CREATE TABLE IF NOT EXISTS students (
+    id SERIAL PRIMARY KEY,
+    first_name TEXT NOT NULL,
+    middle_name TEXT NOT NULL,
+    last_name TEXT
+);
+
+-- Связь студентов с группами
+CREATE TABLE IF NOT EXISTS students_to_groups (
+    stud_id INTEGER NOT NULL
+        REFERENCES students(id) ON DELETE CASCADE,
+    group_id INTEGER NOT NULL
+        REFERENCES groups(id) ON DELETE CASCADE,
+    PRIMARY KEY (stud_id, group_id)
+);
+
 -- Таблица дисциплин
 CREATE TABLE IF NOT EXISTS ra_disc (
     id SERIAL PRIMARY KEY,
