@@ -241,11 +241,30 @@ def test_retake_changes_student_rating(get_conn):
 
         grade.value = max_grade
 
+    results_count_before = get_count(get_conn, "ra_results")
+
     # Вторая версия — полный снимок после пересдачи.
     import_report(
         get_conn,
         report_after_retake,
     )
+
+    results_count_after = get_count(get_conn, "ra_results")
+
+    assert results_count_after == results_count_before
+
+    with get_conn.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT stud_id, COUNT(*)
+            FROM ra_results
+            GROUP BY stud_id
+            HAVING COUNT(*) > 1
+            """
+        )
+        duplicates = cursor.fetchall()
+
+    assert duplicates == []
 
     with get_conn.cursor() as cur:
         cur.execute(

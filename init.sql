@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS ra_mark (
 CREATE TABLE IF NOT EXISTS ra_results (
     id SERIAL PRIMARY KEY,
     position INTEGER,
-    stud_id INTEGER,
+    stud_id INTEGER UNIQUE,
     cur_sem INTEGER,
     open_sem INTEGER,
     session_score INTEGER,

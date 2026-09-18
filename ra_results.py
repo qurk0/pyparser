@@ -1,8 +1,12 @@
-def get_student_marks_with_context(conn, stud_id, version_id):
+from collections import defaultdict
+
+
+def get_marks_with_context(conn, version_id):
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT 
+            SELECT
+                rm.stud_id,
                 rc.sem,
                 rc.form,
                 rc.max_grade,
@@ -12,23 +16,23 @@ def get_student_marks_with_context(conn, stud_id, version_id):
             JOIN ra_control rc ON rm.control_id = rc.id
             JOIN ra_disc rd ON rc.disc_id = rd.id
             WHERE rm.version_id = %s
-              AND rm.stud_id = %s
             """,
-            (version_id, stud_id),
+            (version_id,),
         )
 
         rows = cur.fetchall()
 
-        return [
-            {
-                "sem": row[0],
-                "form": row[1],
-                "max_grade": row[2],
-                "department_id": row[3],
-                "grade": row[4],
-            }
-            for row in rows
-        ]
+    return [
+        {
+            "stud_id": row[0],
+            "sem": row[1],
+            "form": row[2],
+            "max_grade": row[3],
+            "department_id": row[4],
+            "grade": row[5],
+        }
+        for row in rows
+    ]
 
 
 def calculate_scores_and_departments_with_percent(marks_with_context):
@@ -41,7 +45,7 @@ def calculate_scores_and_departments_with_percent(marks_with_context):
     - баллы за предметы других кафедр
     - percent (в процентах от максимально возможного)
     """
-    from collections import defaultdict
+    
 
     scores_by_sem = defaultdict(int)
     vega = vm = other = 0
@@ -83,42 +87,42 @@ def calculate_scores_and_departments_with_percent(marks_with_context):
 
     return session_score, total_score, vega, vm, other, percent
 
-def calculate_diffs(conn, stud_id, total_score, percent):
-    """
-    Считает:
-    - diff_score: разница с тем, что уже записано в ra_results.total_score
-    - diff_percent: разница с ra_results.percent
-    """
+def get_previous_results(conn):
     with conn.cursor() as cur:
-        cur.execute("""
-            SELECT total_score, percent
+        cur.execute(
+            """
+            SELECT stud_id, total_score, percent
             FROM ra_results
-            WHERE stud_id = %s
-        """, (stud_id,))
-        row = cur.fetchone()
+            """
+        )
 
-        if not row:
-            return 0, 0.0  # Нет предыдущих данных — считать не с чем
+        rows = cur.fetchall()
 
-        prev_total_score, prev_percent = row
-        diff_score = total_score - prev_total_score
-        diff_percent = round(percent - prev_percent, 2)
+    return {
+        row[0]: {
+            "total_score": row[1],
+            "percent": row[2],
+        }
+        for row in rows
+    }
+def calculate_diff(previous_result, total_score, percent):
+    if previous_result is None:
+        return 0, 0.0
 
-        return diff_score, diff_percent
+    diff_score = total_score - previous_result["total_score"]
+    diff_percent = round(
+        percent - previous_result["percent"],
+        2,
+    )
 
-# def get_current_semester(marks_with_context):
-#     """
-#     Возвращает максимальный (текущий) семестр, в котором у студента есть хотя бы одна оценка.
-#     """
-#     semesters = {mark["sem"] for mark in marks_with_context if mark["grade"] is not None}
-#     return max(semesters) if semesters else 0
+    return diff_score, diff_percent
 
 def get_open_semester(marks_with_context):
     """
     Возвращает номер самого раннего семестра, где есть хотя бы одна незакрытая оценка.
     Закрытыми считаются только те семестры, где ВСЕ оценки входят в диапазон (-3, 3, 4, 5).
     """
-    from collections import defaultdict
+    
 
     sem_grades = defaultdict(list)
 
@@ -139,24 +143,35 @@ def collect_ra_results(conn, sem, version_id):
     """
     Возвращает список словарей с результатами для всех студентов.
     """
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT DISTINCT stud_id
-            FROM ra_mark
-            WHERE version_id = %s
-            """,
-            (version_id,),
-        )
-        student_ids = [row[0] for row in cur.fetchall()]
+
+    marks = get_marks_with_context(
+        conn,
+        version_id,
+    )
+
+    previous_results = get_previous_results(conn)
+
+    marks_by_student = defaultdict(list)
+
+    for mark in marks:
+        marks_by_student[mark["stud_id"]].append(mark)
 
     results = []
 
-    for stud_id in student_ids:
-        marks = get_student_marks_with_context(conn, stud_id, version_id)
-        session_score, total_score, vega, vm, other, percent = calculate_scores_and_departments_with_percent(marks)
-        diff_score, diff_percent = calculate_diffs(conn, stud_id, total_score, percent)
-        open_sem = get_open_semester(marks)
+    for stud_id, student_marks in marks_by_student.items():
+        session_score, total_score, vega, vm, other, percent = (
+            calculate_scores_and_departments_with_percent(student_marks)
+        )
+
+        previous_result = previous_results.get(stud_id)
+
+        diff_score, diff_percent = calculate_diff(
+            previous_result,
+            total_score,
+            percent,
+        )
+
+        open_sem = get_open_semester(student_marks)
 
         results.append({
             "stud_id": stud_id,
@@ -169,7 +184,7 @@ def collect_ra_results(conn, sem, version_id):
             "vm": vm,
             "other": other,
             "percent": percent,
-            "diff_percent": diff_percent
+            "diff_percent": diff_percent,
         })
 
     return results
@@ -183,83 +198,51 @@ def insert_ra_results(conn, sem, version_id):
         for position, row in enumerate(results, start=1):
             cur.execute(
                 """
-                SELECT 1
-                FROM ra_results
-                WHERE stud_id = %s
+                INSERT INTO ra_results (
+                    position,
+                    stud_id,
+                    cur_sem,
+                    open_sem,
+                    session_score,
+                    total_score,
+                    diff_score,
+                    vega,
+                    vm,
+                    other,
+                    percent,
+                    diff_percent
+                )
+                VALUES (
+                    %s, %s, %s, %s,
+                    %s, %s, %s,
+                    %s, %s, %s, %s, %s
+                )
+                ON CONFLICT (stud_id)
+                DO UPDATE SET
+                    position = EXCLUDED.position,
+                    cur_sem = EXCLUDED.cur_sem,
+                    open_sem = EXCLUDED.open_sem,
+                    session_score = EXCLUDED.session_score,
+                    total_score = EXCLUDED.total_score,
+                    diff_score = EXCLUDED.diff_score,
+                    vega = EXCLUDED.vega,
+                    vm = EXCLUDED.vm,
+                    other = EXCLUDED.other,
+                    percent = EXCLUDED.percent,
+                    diff_percent = EXCLUDED.diff_percent
                 """,
-                (row["stud_id"],),
+                (
+                    position,
+                    row["stud_id"],
+                    row["cur_sem"],
+                    row["open_sem"],
+                    row["session_score"],
+                    row["total_score"],
+                    row["diff_score"],
+                    row["vega"],
+                    row["vm"],
+                    row["other"],
+                    row["percent"],
+                    row["diff_percent"],
+                ),
             )
-
-            exists = cur.fetchone()
-
-            if exists:
-                cur.execute(
-                    """
-                    UPDATE ra_results
-                    SET
-                        position = %s,
-                        cur_sem = %s,
-                        open_sem = %s,
-                        session_score = %s,
-                        total_score = %s,
-                        diff_score = %s,
-                        vega = %s,
-                        vm = %s,
-                        other = %s,
-                        percent = %s,
-                        diff_percent = %s
-                    WHERE stud_id = %s
-                    """,
-                    (
-                        position,
-                        row["cur_sem"],
-                        row["open_sem"],
-                        row["session_score"],
-                        row["total_score"],
-                        row["diff_score"],
-                        row["vega"],
-                        row["vm"],
-                        row["other"],
-                        row["percent"],
-                        row["diff_percent"],
-                        row["stud_id"],
-                    ),
-                )
-            else:
-                cur.execute(
-                    """
-                    INSERT INTO ra_results (
-                        position,
-                        stud_id,
-                        cur_sem,
-                        open_sem,
-                        session_score,
-                        total_score,
-                        diff_score,
-                        vega,
-                        vm,
-                        other,
-                        percent,
-                        diff_percent
-                    )
-                    VALUES (
-                        %s, %s, %s, %s,
-                        %s, %s, %s,
-                        %s, %s, %s, %s, %s
-                    )
-                    """,
-                    (
-                        position,
-                        row["stud_id"],
-                        row["cur_sem"],
-                        row["open_sem"],
-                        row["session_score"],
-                        row["total_score"],
-                        row["diff_score"],
-                        row["vega"],
-                        row["vm"],
-                        row["other"],
-                        row["percent"],
-                        row["diff_percent"],
-                    ),
-                )

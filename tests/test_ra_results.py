@@ -1,8 +1,6 @@
-from unittest.mock import MagicMock
-
 from ra_results import (
     calculate_scores_and_departments_with_percent,
-    calculate_diffs,
+    calculate_diff,
     get_open_semester,
 )
 
@@ -237,14 +235,14 @@ def test_get_open_semester_returns_earliest_open_semester():
     assert get_open_semester(marks) == 1
 
 
-def test_calculate_diffs():
-    conn = MagicMock()
-    cursor = conn.cursor.return_value.__enter__.return_value
-    cursor.fetchone.return_value = (10, 80.0)
+def test_calculate_diff():
+    previous_result = {
+        "total_score": 10,
+        "percent": 80.0,
+    }
 
-    result = calculate_diffs(
-        conn=conn,
-        stud_id=42,
+    result = calculate_diff(
+        previous_result=previous_result,
         total_score=15,
         percent=90.5,
     )
@@ -252,14 +250,14 @@ def test_calculate_diffs():
     assert result == (5, 10.5)
 
 
-def test_calculate_diffs_can_be_negative():
-    conn = MagicMock()
-    cursor = conn.cursor.return_value.__enter__.return_value
-    cursor.fetchone.return_value = (20, 95.0)
+def test_calculate_diff_can_be_negative():
+    previous_result = {
+        "total_score": 20,
+        "percent": 95.0,
+    }
 
-    result = calculate_diffs(
-        conn=conn,
-        stud_id=42,
+    result = calculate_diff(
+        previous_result=previous_result,
         total_score=15,
         percent=90.5,
     )
@@ -267,14 +265,9 @@ def test_calculate_diffs_can_be_negative():
     assert result == (-5, -4.5)
 
 
-def test_calculate_diffs_returns_zero_without_previous_result():
-    conn = MagicMock()
-    cursor = conn.cursor.return_value.__enter__.return_value
-    cursor.fetchone.return_value = None
-
-    result = calculate_diffs(
-        conn=conn,
-        stud_id=42,
+def test_calculate_diff_returns_zero_without_previous_result():
+    result = calculate_diff(
+        previous_result=None,
         total_score=15,
         percent=90.5,
     )
