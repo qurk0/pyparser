@@ -3,9 +3,16 @@ import pytest
 from html_parser import parse_html
 from models import ParsedReport
 
+from pathlib import Path
+
+from html_parser import parse_html
+
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
 @pytest.fixture
 def report():
-    return parse_html("test.html")
+    return parse_html(FIXTURES_DIR / "test.html")
 
 def test_parse_html_returns_parsed_report(report):
     assert isinstance(report, ParsedReport)

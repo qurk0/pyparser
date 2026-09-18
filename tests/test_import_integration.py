@@ -1,14 +1,17 @@
-import pytest
 import os
-import psycopg2
-
-from dotenv import load_dotenv
 from copy import deepcopy
+from pathlib import Path
 
-from main import import_report
+import psycopg2
+import pytest
+from dotenv import load_dotenv
+
 from html_parser import parse_html
-from ra_results import collect_ra_results
+from main import import_report
 from ra_mark import get_student_id
+from ra_results import collect_ra_results
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 @pytest.fixture
 def get_conn():
@@ -38,7 +41,7 @@ def get_count(conn, table_name):
         return cursor.fetchone()[0]
 
 def test_import_report_success(get_conn):
-    report = parse_html("test.html")
+    report = parse_html(FIXTURES_DIR / "test.html")
 
     versions_before = get_count(
         get_conn,
@@ -99,7 +102,7 @@ def test_import_report_success(get_conn):
     assert actual_students == expected_students
 
 def test_import_report_rollback(get_conn):
-    report = parse_html("test.html")
+    report = parse_html(FIXTURES_DIR / "test_rollback.html")
 
     versions_before = get_count(
         get_conn,
@@ -194,7 +197,7 @@ def test_collect_ra_results_only_contains_students_from_current_version(get_conn
     assert student_ids == [student_with_marks]
 
 def test_retake_changes_student_rating(get_conn):
-    report = parse_html("test.html")
+    report = parse_html(FIXTURES_DIR / "test.html")
 
     # Первая версия — исходные результаты.
     import_report(

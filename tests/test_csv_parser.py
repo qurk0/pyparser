@@ -3,9 +3,16 @@ import pytest
 from csv_parser import parse_csv
 from models import ParsedReport
 
+from pathlib import Path
+
+from csv_parser import parse_csv
+
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
 @pytest.fixture
 def report():
-    return parse_csv("test.csv")
+    return parse_csv(FIXTURES_DIR / "test.csv")
 
 def test_parse_csv_returns_parsed_report(report):
     assert isinstance(report, ParsedReport)
