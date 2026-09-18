@@ -104,11 +104,31 @@ def import_report(conn, report):
             semester=semester,
             controls=missing_controls,
         )
+
+    control_ids = {}
+
+    for control in controls:
+        title = control.discipline.title
+
+        control_id = get_control_id_by_disc_plan_form_sem(
+            connection=conn,
+            plan_id=plan_id,
+            disc_id=disc_ids[title],
+            form=control.control_type,
+            sem=semester,
+        )
+
+        if control_id is None:
+            raise ValueError(
+                f"Не найден control_id для дисциплины "
+                f"'{title}' с формой '{control.control_type}'"
+            )
+
+        control_ids[(title, control.control_type)] = control_id
     version_id = insert_ra_mark(
         conn=conn,
         students=students,
-        plan_id=plan_id,
-        sem=semester,
+        control_ids=control_ids,
     )
     insert_ra_results(
         conn=conn,
