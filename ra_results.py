@@ -140,7 +140,14 @@ def collect_ra_results(conn, sem, version_id):
     Возвращает список словарей с результатами для всех студентов.
     """
     with conn.cursor() as cur:
-        cur.execute("SELECT id FROM students")
+        cur.execute(
+            """
+            SELECT DISTINCT stud_id
+            FROM ra_mark
+            WHERE version_id = %s
+            """,
+            (version_id,),
+        )
         student_ids = [row[0] for row in cur.fetchall()]
 
     results = []
