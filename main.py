@@ -103,6 +103,7 @@ def import_report(conn, report):
             plan_id=plan_id,
             semester=semester,
             controls=missing_controls,
+            disc_ids=disc_ids,
         )
 
     control_ids = {}

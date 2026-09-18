@@ -1,27 +1,36 @@
-from ra_disc import get_disc_id_by_title
 import normalization as n
 
 
-def fill_ra_control(connection, plan_id, semester, controls):
+def fill_ra_control(
+    connection,
+    plan_id,
+    semester,
+    controls,
+    disc_ids,
+):
     with connection.cursor() as cursor:
         for control in controls:
-            disc_id = get_disc_id_by_title(
-                connection,
-                control.discipline.title,
+            disc_id = disc_ids.get(
+                control.discipline.title
             )
+
             if disc_id is None:
                 raise ValueError(
                     f"Не найдена дисциплина "
                     f"'{control.discipline.title}'"
                 )
+
             max_grade = n.TYPE_GRADE_MAPPING.get(
                 control.control_type
             )
+
             if max_grade is None:
                 raise ValueError(
                     f"Неизвестный тип контроля "
                     f"'{control.control_type}'"
                 )
+
+            # дальше твой INSERT без изменений
             insert_query = """
                 INSERT INTO ra_control (
                     plan_id,
